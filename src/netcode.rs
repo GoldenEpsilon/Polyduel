@@ -1,9 +1,16 @@
 use crate::game::*;
 use bevy::prelude::*;
 use bevy_matchbox::prelude::*;
-use bevy_ggrs::ggrs::{Config, PlayerHandle, self};
+use bevy_ggrs::ggrs::{Config, PlayerHandle, self, InputStatus};
 use bevy_ggrs::PlayerInputs;
 
+#[derive(Clone, Eq, PartialEq, Debug, Hash, Default, States)]
+pub enum NetworkState {
+    #[default]
+    Offline,
+    Connecting,
+    Online
+}
 
 #[derive(Resource)]
 pub struct LocalHandles {
@@ -24,9 +31,11 @@ pub fn start_matchbox_socket(mut commands: Commands) {
     commands.insert_resource(MatchboxSocket::new_ggrs(room_url));
 }
 
-pub fn wait_for_players(mut commands: Commands, mut socket: ResMut<MatchboxSocket<SingleChannel>>) {
+pub fn wait_for_players(mut next_state: ResMut<NextState<NetworkState>>, mut commands: Commands, mut socket: ResMut<MatchboxSocket<SingleChannel>>) {
     if socket.get_channel(0).is_err() {
-        return; // we've already started
+        // we've already started, update the state!
+        next_state.set(NetworkState::Online);
+        return; 
     }
 
     // Check for new connections
@@ -69,6 +78,7 @@ pub fn network_input(
     return input(keyboard_input);
 }
 
-fn network_move_players(inputs: Res<PlayerInputs<GGRSConfig>>, mut players: Query<(&mut Transform, &Player)>) {
-    move_players(inputs, players);
+pub fn network_move_players(inputs: Res<PlayerInputs<GGRSConfig>>, players: Query<(&mut Transform, &Player)>) {
+    let (localinputs, _inputstatus): (Vec<u16>, Vec<InputStatus>) = inputs.iter().cloned().unzip();
+    move_players(localinputs, players);
 }

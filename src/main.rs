@@ -1,12 +1,12 @@
 mod game;
-mod matchmaking;
+mod netcode;
 
 use crate::game::*;
-use crate::matchmaking::*;
+use crate::netcode::*;
 use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
 use bevy::render::texture::ImageSampler;
-use bevy_ggrs::{GgrsPlugin, GgrsSchedule, AddRollbackCommandExtension, GgrsAppExtension};
+use bevy_ggrs::{GgrsPlugin, GgrsSchedule, GgrsAppExtension};
 
 const FPS: usize = 60;
 
@@ -28,6 +28,7 @@ fn main() {
 
     app
         .add_state::<GameState>()
+        .add_state::<NetworkState>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 // fill the entire window
@@ -46,22 +47,24 @@ fn main() {
             //.register_rollback_component::<Checksum>()
             //.register_rollback_resource::<FrameCount>()
         )
-        .add_systems(Startup, (setup, start_matchbox_socket))
-        .add_systems(Update, (spritemap_fix, wait_for_players))
+        .add_systems(Startup, setup)
+        .add_systems(Update, spritemap_fix)
+        .add_systems(OnEnter(GameState::Gameplay), spawn_players)
+        .add_systems(Update, (offline_update).run_if(in_state(NetworkState::Offline).and_then(in_state(GameState::Gameplay))))
+        .add_systems(OnEnter(NetworkState::Connecting), start_matchbox_socket)
+        .add_systems(Update, (wait_for_players).run_if(in_state(NetworkState::Connecting)))
+
         // rollback schedule
         .add_systems(
             GgrsSchedule,
             (
                 //apply_inputs,
-                move_players,
+                network_move_players,
                 //increase_frame_count,
                 //checksum_players,
-                global_update
             )
-                .chain(),
+                .chain().run_if(in_state(NetworkState::Online)),
         )
-        //.add_systems(Update, button_system)
-        //.add_systems(FixedUpdate, global_update)
         .run();
 }
 
@@ -69,22 +72,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let mut camera_bundle = Camera2dBundle::default();
     camera_bundle.projection.scaling_mode = ScalingMode::Fixed { width: 432.0, height: 243.0 };
     commands.spawn(camera_bundle);
-    commands.spawn((
-        Player{ handle: 0 },
-        SpriteBundle {
-            transform: Transform::from_translation(Vec3::new(-50., 0., 0.)),
-            texture: asset_server.load("IdIdle.png"),
-            ..default()
-        }
-    )).add_rollback();
-    commands.spawn((
-        Player{ handle: 1 },
-        SpriteBundle {
-            transform: Transform::from_translation(Vec3::new(50., 0., 0.)),
-            texture: asset_server.load("IdIdle.png"),
-            ..default()
-        }
-    )).add_rollback();
 }
 
 //thank you https://stackoverflow.com/questions/76292957/what-is-the-correct-way-to-implement-nearestneighbor-for-textureatlas-sprites-in
@@ -104,7 +91,8 @@ fn spritemap_fix(
     }
 }
 
-fn global_update(mut interaction_query: Query<(&mut Transform, &mut Handle<Image>)>){
-    for (_, _) in &mut interaction_query {
-    }
+fn offline_update(keyboard_input: Res<Input<KeyCode>>, players: Query<(&mut Transform, &Player)>){
+    let mut inputs: Vec<u16> = vec![0; players.iter().len()];
+    inputs[0] = input(keyboard_input);//TEMP, is currently only going to P1 slot
+    move_players(inputs, players);
 }

@@ -1,8 +1,5 @@
 use bevy::prelude::*;
-
-//TEMP "use" STATEMENTS, SHOULD BE REMOVED WHEN POSSIBLE
-use bevy_ggrs::PlayerInputs;
-use crate::matchmaking::GGRSConfig;
+use bevy_ggrs::AddRollbackCommandExtension;
 
 const INPUT_UP: u16 = 1 << 0;
 const INPUT_DOWN: u16 = 1 << 1;
@@ -16,6 +13,25 @@ const INPUT_S: u16 = 1 << 7;
 #[derive(Component)]
 pub struct Player {
     pub handle: usize //TODO: REMOVE THIS PUB
+}
+
+pub fn spawn_players(mut commands: Commands, asset_server: Res<AssetServer>){
+    commands.spawn((
+        Player{ handle: 0 },
+        SpriteBundle {
+            transform: Transform::from_translation(Vec3::new(-50., 0., 0.)),
+            texture: asset_server.load("IdIdle.png"),
+            ..default()
+        }
+    )).add_rollback();
+    commands.spawn((
+        Player{ handle: 1 },
+        SpriteBundle {
+            transform: Transform::from_translation(Vec3::new(50., 0., 0.)),
+            texture: asset_server.load("IdIdle.png"),
+            ..default()
+        }
+    )).add_rollback();
 }
 
 pub fn input(
@@ -52,9 +68,10 @@ pub fn input(
     inp
 }
 
-pub fn move_players(inputs: Res<PlayerInputs<GGRSConfig>>, mut players: Query<(&mut Transform, &Player)>) {
+pub fn move_players(inputs: Vec<u16>, mut players: Query<(&mut Transform, &Player)>) {
     for (mut transform, player) in &mut players {
-        let (input, _) = inputs[player.handle];
+
+        let input = inputs[player.handle];
 
         let mut direction = Vec2::ZERO;
 
