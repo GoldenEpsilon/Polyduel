@@ -12,7 +12,7 @@ const INPUT_S: u16 = 1 << 7;
 
 #[derive(Component)]
 pub struct Player {
-    pub handle: usize //TODO: REMOVE THIS PUB
+    handle: usize
 }
 
 pub fn spawn_players(mut commands: Commands, asset_server: Res<AssetServer>){

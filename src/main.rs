@@ -1,12 +1,14 @@
 mod game;
 mod netcode;
+mod menu;
 
 use crate::game::*;
 use crate::netcode::*;
+use crate::menu::*;
 use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
 use bevy::render::texture::ImageSampler;
-use bevy_ggrs::{GgrsPlugin, GgrsSchedule, GgrsAppExtension};
+use bevy_ggrs::{GgrsPlugin, GgrsSchedule};
 
 const FPS: usize = 60;
 
@@ -49,12 +51,23 @@ fn main() {
         )
         .add_systems(Startup, setup)
         .add_systems(Update, spritemap_fix)
-        .add_systems(OnEnter(GameState::Gameplay), spawn_players)
-        .add_systems(Update, (offline_update).run_if(in_state(NetworkState::Offline).and_then(in_state(GameState::Gameplay))))
+
+        //Menus
+        .add_systems(OnEnter(GameState::Menu), menu_setup)
+        .add_systems(Update, (button_system).run_if(in_state(GameState::Menu)))
+        .add_systems(OnExit(GameState::Menu), menu_cleanup)
+
+        //Connecting to online
         .add_systems(OnEnter(NetworkState::Connecting), start_matchbox_socket)
         .add_systems(Update, (wait_for_players).run_if(in_state(NetworkState::Connecting)))
 
-        // rollback schedule
+        //Gameplay, both offline and online
+        .add_systems(OnEnter(GameState::Gameplay), spawn_players)
+
+        //Offline gameplay
+        .add_systems(Update, (offline_update).run_if(in_state(NetworkState::Offline).and_then(in_state(GameState::Gameplay))))
+
+        //Online Gameplay (rollback schedule)
         .add_systems(
             GgrsSchedule,
             (
@@ -68,7 +81,7 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn setup(mut commands: Commands) {
     let mut camera_bundle = Camera2dBundle::default();
     camera_bundle.projection.scaling_mode = ScalingMode::Fixed { width: 432.0, height: 243.0 };
     commands.spawn(camera_bundle);
