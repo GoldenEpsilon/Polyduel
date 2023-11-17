@@ -7,8 +7,7 @@ use crate::netcode::*;
 use crate::menu::*;
 use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
-use bevy::render::texture::ImageSampler;
-use bevy_ggrs::{GgrsPlugin, GgrsSchedule};
+use bevy_ggrs::{GgrsAppExtension, GgrsPlugin, GgrsSchedule};
 
 const FPS: usize = 60;
 
@@ -40,7 +39,7 @@ fn main() {
                 ..default()
             }),
             ..default()
-        }))
+        }).set(ImagePlugin::default_nearest()))
         .add_ggrs_plugin(
             GgrsPlugin::<GGRSConfig>::new()
             .with_update_frequency(FPS)
@@ -50,7 +49,6 @@ fn main() {
             //.register_rollback_resource::<FrameCount>()
         )
         .add_systems(Startup, setup)
-        .add_systems(Update, spritemap_fix)
 
         //Menus
         .add_systems(OnEnter(GameState::Menu), menu_setup)
@@ -65,7 +63,7 @@ fn main() {
         .add_systems(OnEnter(GameState::Gameplay), spawn_players)
 
         //Offline gameplay
-        .add_systems(Update, (offline_update).run_if(in_state(NetworkState::Offline).and_then(in_state(GameState::Gameplay))))
+        .add_systems(FixedUpdate, (offline_update).run_if(in_state(NetworkState::Offline).and_then(in_state(GameState::Gameplay))))
 
         //Online Gameplay (rollback schedule)
         .add_systems(
@@ -85,23 +83,6 @@ fn setup(mut commands: Commands) {
     let mut camera_bundle = Camera2dBundle::default();
     camera_bundle.projection.scaling_mode = ScalingMode::Fixed { width: 432.0, height: 243.0 };
     commands.spawn(camera_bundle);
-}
-
-//thank you https://stackoverflow.com/questions/76292957/what-is-the-correct-way-to-implement-nearestneighbor-for-textureatlas-sprites-in
-fn spritemap_fix(
-    mut ev_asset: EventReader<AssetEvent<Image>>,
-    mut assets: ResMut<Assets<Image>>,
-) {
-    for ev in ev_asset.iter() {
-        match ev {
-            AssetEvent::Created { handle } => {
-                if let Some(texture) = assets.get_mut(&handle) {
-                    texture.sampler_descriptor = ImageSampler::nearest()
-                }
-            },
-            _ => {}
-        }
-    }
 }
 
 fn offline_update(keyboard_input: Res<Input<KeyCode>>, players: Query<(&mut Transform, &Player)>){

@@ -1,12 +1,19 @@
+use crate::*;
+
 use bevy::prelude::*;
 
 
 #[derive(Component)]
 pub struct MenuButton {}
 
+#[derive(Resource)]
+pub struct MenuData {
+    button_entity: Entity,
+}
+
 pub fn menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
-    commands
-        .spawn((NodeBundle {
+    let button_entity = commands
+        .spawn(NodeBundle {
             style: Style {
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
@@ -15,12 +22,11 @@ pub fn menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                 ..default()
             },
             ..default()
-        }, MenuButton {}
-        )
+        }
         )
         .with_children(|parent| {
             parent
-                .spawn(ButtonBundle {
+                .spawn((ButtonBundle {
                     style: Style {
                         width: Val::Px(150.0),
                         height: Val::Px(65.0),
@@ -34,7 +40,7 @@ pub fn menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                     border_color: BorderColor(Color::BLACK),
                     background_color: BackgroundColor(Color::RED),
                     ..default()
-                })
+                }, MenuButton {}))
                 .with_children(|parent| {
                     parent.spawn(TextBundle::from_section(
                         "Button",
@@ -46,7 +52,8 @@ pub fn menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                         },
                     ));
                 });
-        });
+        }).id();
+    commands.insert_resource(MenuData { button_entity });
 }
 
 pub fn button_system(
@@ -61,6 +68,7 @@ pub fn button_system(
         (Changed<Interaction>, With<Button>),
     >,
     mut text_query: Query<&mut Text>,
+    mut next_state: ResMut<NextState<GameState>>
 ) {
     for (interaction, mut color, mut border_color, children, button) in &mut interaction_query {
         let mut text = text_query.get_mut(children[0]).unwrap();
@@ -69,6 +77,7 @@ pub fn button_system(
                 text.sections[0].value = "Press".to_string();
                 *color = BackgroundColor(Color::BLUE);
                 border_color.0 = Color::RED;
+                next_state.set(GameState::Gameplay);
             }
             Interaction::Hovered => {
                 text.sections[0].value = "Hover".to_string();
@@ -86,9 +95,7 @@ pub fn button_system(
 
 pub fn menu_cleanup(
     mut commands: Commands,
-    query: Query<Entity, With<MenuButton>>,
+    menu_data: Res<MenuData>
 ) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
-    }
+    commands.entity(menu_data.button_entity).despawn_recursive();
 }

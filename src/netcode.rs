@@ -17,6 +17,11 @@ pub struct LocalHandles {
     pub handles: Vec<PlayerHandle>,
 }
 
+#[derive(Resource)]
+pub struct IP {
+    pub ip: String,
+}
+
 #[derive(Debug)]
 pub struct GGRSConfig;
 impl Config for GGRSConfig {
@@ -25,8 +30,8 @@ impl Config for GGRSConfig {
     type Address = PeerId;
 }
 
-pub fn start_matchbox_socket(mut commands: Commands) {
-    let room_url = "ws://162.195.243.83:25565/polyduel?next=2";
+pub fn start_matchbox_socket(mut commands: Commands, ip: Res<IP>) {
+    let room_url = format!("ws://{}:3536/polyduel?next=2", ip.ip);
     info!("connecting to matchbox server: {room_url}");
     commands.insert_resource(MatchboxSocket::new_ggrs(room_url));
 }
