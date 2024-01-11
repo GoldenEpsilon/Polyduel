@@ -15,6 +15,11 @@ pub struct Player {
     handle: usize
 }
 
+#[derive(Component)]
+pub struct Movable {
+    
+}
+
 pub fn spawn_players(mut commands: Commands, asset_server: Res<AssetServer>){
     commands.spawn((
         Player{ handle: 0 },
@@ -96,4 +101,8 @@ pub fn move_players(inputs: Vec<u16>, mut players: Query<(&mut Transform, &Playe
 
         transform.translation += move_delta;
     }
+}
+
+pub fn gravity() {
+
 }
