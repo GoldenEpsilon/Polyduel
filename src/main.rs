@@ -47,20 +47,20 @@ impl<'a> GGRSDemo<'a> {
         }
     }
 
-    fn run(&mut self) {
+    fn run(&mut self, ctx: &mut Context) {
         //loop {
             //clear_background(BLACK);
             match &mut self.state {
-                DemoState::Lobby => self.run_lobby(),
-                DemoState::Connecting => self.run_connecting(),
-                DemoState::Game => self.run_game(),
+                DemoState::Lobby => self.run_lobby(ctx),
+                DemoState::Connecting => self.run_connecting(ctx),
+                DemoState::Game => self.run_game(ctx),
             }
             //next_frame().await;
         //}
     }
 
-    fn run_lobby(&mut self) {
-        if let Some(room_id) = self.lobby.run() {
+    fn run_lobby(&mut self, ctx: &mut Context) {
+        if let Some(room_id) = self.lobby.run(ctx) {
             println!("Constructing socket...");
             let room_url = format!("{MATCHBOX_ADDR}/{room_id}");
             let (socket, message_loop) = WebRtcSocket::new(room_url);
@@ -71,7 +71,7 @@ impl<'a> GGRSDemo<'a> {
         }
     }
 
-    fn run_connecting(&mut self) {
+    fn run_connecting(&mut self, ctx: &mut Context) {
         let socket = self
             .socket
             .as_mut()
@@ -131,7 +131,7 @@ impl<'a> GGRSDemo<'a> {
         }*/
     }
 
-    fn run_game(&mut self) {
+    fn run_game(&mut self, ctx: &mut Context) {
         let sess = self
             .session
             .as_mut()
@@ -214,7 +214,7 @@ impl ggez::event::EventHandler<GameError> for State<'_> {
                 .accumulator
                 .saturating_sub(Duration::from_secs_f64(fps_delta));
         }*/
-        self.demo.run();
+        self.demo.run(ctx);
         Ok(())
     }
     fn draw(&mut self, ctx: &mut Context) -> GameResult {

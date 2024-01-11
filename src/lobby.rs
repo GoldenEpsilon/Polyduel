@@ -13,38 +13,38 @@ impl Lobby {
         }
     }
 
-    pub fn run(&mut self) -> Option<String> {
-        /*if is_key_pressed(KeyCode::Key0) {
+    pub fn run(&mut self, ctx: &mut Context) -> Option<String> {
+        if ctx.keyboard.is_key_just_pressed(input::keyboard::KeyCode::Key0) {
             self.text_field.push_str("0");
         }
-        if is_key_pressed(KeyCode::Key1) {
+        if ctx.keyboard.is_key_just_pressed(input::keyboard::KeyCode::Key1) {
             self.text_field.push_str("1");
         }
-        if is_key_pressed(KeyCode::Key2) {
+        if ctx.keyboard.is_key_just_pressed(input::keyboard::KeyCode::Key2) {
             self.text_field.push_str("2");
         }
-        if is_key_pressed(KeyCode::Key3) {
+        if ctx.keyboard.is_key_just_pressed(input::keyboard::KeyCode::Key3) {
             self.text_field.push_str("3");
         }
-        if is_key_pressed(KeyCode::Key4) {
+        if ctx.keyboard.is_key_just_pressed(input::keyboard::KeyCode::Key4) {
             self.text_field.push_str("4");
         }
-        if is_key_pressed(KeyCode::Key5) {
+        if ctx.keyboard.is_key_just_pressed(input::keyboard::KeyCode::Key5) {
             self.text_field.push_str("5");
         }
-        if is_key_pressed(KeyCode::Key6) {
+        if ctx.keyboard.is_key_just_pressed(input::keyboard::KeyCode::Key6) {
             self.text_field.push_str("6");
         }
-        if is_key_pressed(KeyCode::Key7) {
+        if ctx.keyboard.is_key_just_pressed(input::keyboard::KeyCode::Key7) {
             self.text_field.push_str("7");
         }
-        if is_key_pressed(KeyCode::Key8) {
+        if ctx.keyboard.is_key_just_pressed(input::keyboard::KeyCode::Key8) {
             self.text_field.push_str("8");
         }
-        if is_key_pressed(KeyCode::Key9) {
+        if ctx.keyboard.is_key_just_pressed(input::keyboard::KeyCode::Key9) {
             self.text_field.push_str("9");
         }
-        if is_key_pressed(KeyCode::Backspace) {
+        if ctx.keyboard.is_key_just_pressed(input::keyboard::KeyCode::Back) {
             let mut chars = self.text_field.chars();
             chars.next_back();
             self.text_field = chars.as_str().to_owned();
@@ -54,19 +54,32 @@ impl Lobby {
             self.text_field = self.text_field[0..4].to_owned();
         }
 
-        self.render();
+        self.render(ctx);
 
-        if is_key_pressed(KeyCode::Enter) && self.text_field.len() == 4 {
+        if ctx.keyboard.is_key_just_pressed(input::keyboard::KeyCode::Return) && self.text_field.len() == 4 {
             Some(format!("macro{}", self.text_field))
-        } else if is_key_pressed(KeyCode::Enter) && self.text_field.len() == 0 {
+        } else if ctx.keyboard.is_key_just_pressed(input::keyboard::KeyCode::Return) && self.text_field.len() == 0 {
             Some("macro?next=2".to_owned())
         } else {
             None
-        }*/
-        None
+        }
     }
 
-    fn render(&self) {
+    fn render(&self, ctx: &mut Context) {
+        let mut canvas = graphics::Canvas::from_frame(ctx, graphics::Color::BLACK);
+    
+        let circle = graphics::Mesh::new_circle(
+            ctx,
+            graphics::DrawMode::fill(),
+            mint::Point2{x: 200.0, y: 300.0},
+            100.0,
+            0.1,
+            graphics::Color::WHITE,
+        );
+        if let Ok(circle) = circle {
+            canvas.draw(&circle, graphics::DrawParam::default());
+        }
+        let _ = canvas.finish(ctx);
         /*clear_background(BLACK);
         let dest_x = screen_width() / 2.0;
         let dest_y = self.logo.height() * (dest_x / self.logo.width());
