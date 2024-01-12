@@ -1,3 +1,4 @@
+mod backend;
 mod game;
 mod netcode;
 mod menu;
@@ -5,6 +6,7 @@ mod menu;
 use crate::game::*;
 use crate::netcode::*;
 use crate::menu::*;
+use backend::animation_system;
 use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
 use bevy_ggrs::{GgrsAppExtension, GgrsPlugin, GgrsSchedule};
@@ -49,6 +51,9 @@ fn main() {
             //.register_rollback_resource::<FrameCount>()
         )
         .add_systems(Startup, setup)
+
+        //Backend Systems
+        .add_systems(Update, animation_system)
 
         //Menus
         .add_systems(OnEnter(GameState::Menu), menu_setup)

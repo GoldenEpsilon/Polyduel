@@ -23,9 +23,10 @@ pub struct Movable {
 pub fn spawn_players(mut commands: Commands, asset_server: Res<AssetServer>){
     commands.spawn((
         Player{ handle: 0 },
-        SpriteBundle {
+        SpriteSheetBundle {
             transform: Transform::from_translation(Vec3::new(-50., 0., 0.)),
-            texture: asset_server.load("IdIdle.png"),
+            texture_atlas: asset_server.load("Ky-Idle.png"),
+            sprite: TextureAtlasSprite::new(0),
             ..default()
         }
     )).add_rollback();

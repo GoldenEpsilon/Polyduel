@@ -4,7 +4,14 @@ use bevy::prelude::*;
 
 
 #[derive(Component)]
-pub struct MenuButton {}
+pub struct MenuButton {
+    button_type: ButtonType
+}
+
+pub enum ButtonType {
+    Online,
+    Offline
+}
 
 #[derive(Resource)]
 pub struct MenuData {
@@ -40,7 +47,7 @@ pub fn menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                     border_color: BorderColor(Color::BLACK),
                     background_color: BackgroundColor(Color::RED),
                     ..default()
-                }, MenuButton {}))
+                }, MenuButton { button_type: ButtonType::Offline }))
                 .with_children(|parent| {
                     parent.spawn(TextBundle::from_section(
                         "Button",
@@ -68,26 +75,38 @@ pub fn button_system(
         (Changed<Interaction>, With<Button>),
     >,
     mut text_query: Query<&mut Text>,
-    mut next_state: ResMut<NextState<GameState>>
+    mut next_state: ResMut<NextState<GameState>>,
+    mut network_state: ResMut<NextState<NetworkState>>
 ) {
     for (interaction, mut color, mut border_color, children, button) in &mut interaction_query {
         let mut text = text_query.get_mut(children[0]).unwrap();
         match *interaction {
             Interaction::Pressed => {
-                text.sections[0].value = "Press".to_string();
                 *color = BackgroundColor(Color::BLUE);
                 border_color.0 = Color::RED;
-                next_state.set(GameState::Gameplay);
+                match button.button_type {
+                    ButtonType::Offline => {
+                        network_state.set(NetworkState::Offline);
+                        next_state.set(GameState::Gameplay);
+                    }
+                    _ => {}
+                }
             }
             Interaction::Hovered => {
-                text.sections[0].value = "Hover".to_string();
                 *color = BackgroundColor(Color::YELLOW);
                 border_color.0 = Color::WHITE;
             }
             Interaction::None => {
-                text.sections[0].value = "Button".to_string();
                 *color = BackgroundColor(Color::GREEN);
                 border_color.0 = Color::BLACK;
+            }
+        }
+        match button.button_type {
+            ButtonType::Offline => {
+                text.sections[0].value = "Offline".to_string();
+            }
+            _ => {
+                text.sections[0].value = "Button".to_string();
             }
         }
     }
