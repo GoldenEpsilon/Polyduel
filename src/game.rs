@@ -1,412 +1,381 @@
-use bytemuck::{Pod, Zeroable};
-use ggrs::{
-    Config, Frame, GGRSEvent, GGRSRequest, GameStateCell, InputStatus, NetworkStats, P2PSession,
-    PlayerHandle, NULL_FRAME,
-};
+use std::collections::VecDeque;
+
+use bevy::{core::{Pod, Zeroable}, prelude::*};
+use bevy_ggrs::AddRollbackCommandExtension;
+use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 
-const FPS: u64 = 60;
-const CHECKSUM_PERIOD: i32 = 100;
+use crate::{actions::{Action, MovementEffect}, fighters::{get_fighter, Fighter, FighterList}, AnimationData, SpriteRes};
 
-const SHIP_HEIGHT: f32 = 50.;
-const SHIP_BASE: f32 = 40.;
-const ARENA_HEIGHT: f32 = 800.0;
-const ARENA_WIDTH: f32 = 800.0;
-
-const INPUT_UP: u8 = 0b0001;
-const INPUT_DOWN: u8 = 0b0010;
-const INPUT_LEFT: u8 = 0b0100;
-const INPUT_RIGHT: u8 = 0b1000;
-
-const MOVEMENT_SPEED: f32 = 15.0 / FPS as f32;
-const ROTATION_SPEED: f32 = 2.5 / FPS as f32;
-const MAX_SPEED: f32 = 7.0;
-const FRICTION: f32 = 0.98;
-
+#[derive(Debug, Copy, Clone, Pod, Zeroable, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[repr(C)]
-#[derive(Copy, Clone, PartialEq, Pod, Zeroable)]
-pub struct Input {
-    pub inp: u8,
-}
+pub struct Inputs(u16);
 
-/// `GGRSConfig` holds all type parameters for GGRS Sessions
-#[derive(Debug)]
-pub struct GGRSConfig;
-impl Config for GGRSConfig {
-    type Input = Input;
-    type State = State;
-    type Address = String;
-}
-
-/// computes the fletcher16 checksum, copied from wikipedia: <https://en.wikipedia.org/wiki/Fletcher%27s_checksum>
-fn fletcher16(data: &[u8]) -> u16 {
-    let mut sum1: u16 = 0;
-    let mut sum2: u16 = 0;
-
-    for index in 0..data.len() {
-        sum1 = (sum1 + data[index] as u16) % 255;
-        sum2 = (sum2 + sum1) % 255;
+impl Inputs {
+    pub fn movement_input(&self) -> Inputs {
+        *self & (Inputs::LEFT | Inputs::RIGHT | Inputs::DOWN | Inputs::UP)
+    }
+    pub fn has(&self, other: &Inputs) -> bool {
+        *self & *other == *other
+    }
+    pub fn has_dir(&self, other: &u8) -> bool {
+        self.movement_input() == match other {
+            1 => {
+                Inputs::LEFT | Inputs::DOWN
+            }
+            2 => {
+                Inputs::DOWN
+            }
+            3 => {
+                Inputs::RIGHT | Inputs::DOWN
+            }
+            4 => {
+                Inputs::LEFT
+            }
+            5 => {
+                Inputs::NONE
+            }
+            6 => {
+                Inputs::RIGHT
+            }
+            7 => {
+                Inputs::LEFT | Inputs::UP
+            }
+            8 => {
+                Inputs::UP
+            }
+            9 => {
+                Inputs::RIGHT | Inputs::UP
+            }
+            _ => {
+                warn!("TRIED TO MATCH NON-NUMPAD DIR INPUT: {}", other);
+                Inputs::NONE
+            }
+        }
     }
 
-    (sum2 << 8) | sum1
-}
-
-#[derive(Copy, Clone)]
-// display the connection status for each remote player
-pub enum ConnectionStatus {
-    Local,
-    Synchronizing,
-    Running,
-    Interrupted,
-    Disconnected,
-}
-
-pub enum FrameStatus {
-    Normal,
-    Slow,
-    Halt,
-}
-
-impl Default for ConnectionStatus {
-    fn default() -> Self {
-        ConnectionStatus::Synchronizing
+    pub fn has_dir_loose(&self, other: &u8) -> bool {
+        self.movement_input() & match other {
+            1 => {
+                Inputs::LEFT | Inputs::DOWN
+            }
+            2 => {
+                Inputs::DOWN
+            }
+            3 => {
+                Inputs::RIGHT | Inputs::DOWN
+            }
+            4 => {
+                Inputs::LEFT
+            }
+            5 => {
+                Inputs::NONE
+            }
+            6 => {
+                Inputs::RIGHT
+            }
+            7 => {
+                Inputs::LEFT | Inputs::UP
+            }
+            8 => {
+                Inputs::UP
+            }
+            9 => {
+                Inputs::RIGHT | Inputs::UP
+            }
+            _ => {
+                warn!("TRIED TO MATCH NON-NUMPAD DIR INPUT: {}", other);
+                Inputs::NONE
+            }
+        } != Inputs::NONE
     }
+}
+
+bitflags! {
+    impl Inputs: u16 {
+        const NONE = 0;
+        const UP = 1 << 0;
+        const DOWN = 1 << 1;
+        const LEFT = 1 << 2;
+        const RIGHT = 1 << 3;
+        const L = 1 << 4;
+        const M = 1 << 5;
+        const H = 1 << 6;
+        const S = 1 << 7;
+        const BUFFERCLEAR = 0xFF;
+    }
+}
+
+#[derive(Component)]
+pub struct Player {
+    handle: usize,
+    fighter: Fighter
+}
+
+#[derive(Component, Default)]
+pub struct ActionComponent {
+    pub actions: Vec<Action>
+}
+
+#[derive(Component, Default)]
+pub struct Movable {
+    pub input: GameInput,
+    pub movements: Vec<MovementData>,
+    pub grounded: bool,
+    pub facing: FacingDirection,
+    pub yspeed: f32,
+    pub gravity: f32,
+}
+
+#[derive(Default)]
+pub enum FacingDirection {
+    #[default]
+    Right,
+    Left
 }
 
 #[derive(Default, Clone, Copy)]
-pub struct ConnectionInfo {
-    pub status: ConnectionStatus,
-    pub stats: Option<NetworkStats>,
-}
-
-fn stats_to_string(stats: Option<NetworkStats>) -> String {
-    match stats {
-        Some(stat) => format!("Ping: {}, kbps: {}", stat.ping, stat.kbps_sent),
-        None => "-".to_owned(),
-    }
-}
-
-// Game will handle rendering, gamestate, inputs and GGRSRequests
-pub struct Game {
-    num_players: usize,
-    game_state: State,
-    last_checksum: (Frame, u64),
-    periodic_checksum: (Frame, u64),
-    pub connection_info: Vec<ConnectionInfo>,
-    pub frame_info: FrameStatus,
-}
-
-impl Game {
-    pub fn new(num_players: usize) -> Self {
-        assert!(num_players <= 4);
-        Self {
-            num_players,
-            game_state: State::new(num_players),
-            last_checksum: (NULL_FRAME, 0),
-            periodic_checksum: (NULL_FRAME, 0),
-            connection_info: vec![ConnectionInfo::default(); num_players],
-            frame_info: FrameStatus::Normal,
-        }
-    }
-
-    pub fn set_connection_status(&mut self, handles: Vec<PlayerHandle>, status: ConnectionStatus) {
-        for handle in handles {
-            self.connection_info[handle].status = status;
-        }
-    }
-
-    // for each request, call the appropriate function
-    pub fn handle_requests(&mut self, requests: Vec<GGRSRequest<GGRSConfig>>) {
-        for request in requests {
-            match request {
-                GGRSRequest::LoadGameState { cell, .. } => self.load_game_state(cell),
-                GGRSRequest::SaveGameState { cell, frame } => self.save_game_state(cell, frame),
-                GGRSRequest::AdvanceFrame { inputs } => self.advance_frame(inputs),
-            }
-        }
-    }
-
-    pub fn handle_events(&mut self, sess: &mut P2PSession<GGRSConfig>) {
-        let events: Vec<GGRSEvent<GGRSConfig>> = sess.events().collect();
-        for event in events {
-            println!("Event: {:?}", event);
-            match event {
-                GGRSEvent::Synchronized { addr } => self.set_connection_status(
-                    sess.handles_by_address(addr),
-                    ConnectionStatus::Running,
-                ),
-                GGRSEvent::Disconnected { addr } => self.set_connection_status(
-                    sess.handles_by_address(addr),
-                    ConnectionStatus::Disconnected,
-                ),
-                GGRSEvent::NetworkInterrupted {
-                    addr,
-                    disconnect_timeout: _,
-                } => self.set_connection_status(
-                    sess.handles_by_address(addr),
-                    ConnectionStatus::Interrupted,
-                ),
-                GGRSEvent::NetworkResumed { addr } => self.set_connection_status(
-                    sess.handles_by_address(addr),
-                    ConnectionStatus::Running,
-                ),
-                _ => (),
-            };
-        }
-    }
-
-    // save current gamestate, create a checksum
-    // creating a checksum here is only relevant for SyncTestSessions
-    fn save_game_state(&mut self, cell: GameStateCell<State>, frame: Frame) {
-        assert_eq!(self.game_state.frame, frame);
-        let buffer = bincode::serialize(&self.game_state).unwrap();
-        let checksum = fletcher16(&buffer) as u128;
-        cell.save(frame, Some(self.game_state.clone()), Some(checksum));
-    }
-
-    // load gamestate and overwrite
-    fn load_game_state(&mut self, cell: GameStateCell<State>) {
-        self.game_state = cell.load().expect("No data found.");
-    }
-
-    fn advance_frame(&mut self, inputs: Vec<(Input, InputStatus)>) {
-        // advance the game state
-        self.game_state.advance(inputs);
-
-        // remember checksum to render it later
-        // it is very inefficient to serialize the gamestate here just for the checksum
-        let buffer = bincode::serialize(&self.game_state).unwrap();
-        let checksum = fletcher16(&buffer) as u64;
-        self.last_checksum = (self.game_state.frame, checksum);
-        if self.game_state.frame % CHECKSUM_PERIOD == 0 {
-            self.periodic_checksum = (self.game_state.frame, checksum);
-        }
-    }
-
-    // renders the game to the window
-    pub fn render(&self) {
-        /*clear_background(BLACK);
-
-        // center the game in the screen
-        let displ_x = (screen_width() - ARENA_WIDTH) / 2.0;
-        let displ_y = (screen_height() - ARENA_HEIGHT) / 2.0;
-        let displ_vec = Vec2::new(displ_x, displ_y);
-
-        draw_rectangle_lines(displ_x, displ_y, ARENA_WIDTH, ARENA_HEIGHT, 2.0, YELLOW);
-
-        // render players
-        for i in 0..self.num_players {
-            let color = match i {
-                0 => GOLD,
-                1 => BLUE,
-                2 => GREEN,
-                3 => RED,
-                _ => WHITE,
-            };
-            let (x, y) = self.game_state.positions[i];
-            let rotation = self.game_state.rotations[i] + std::f32::consts::PI / 2.0;
-            let v1 = Vec2::new(
-                x + rotation.sin() * SHIP_HEIGHT / 2.,
-                y - rotation.cos() * SHIP_HEIGHT / 2.,
-            );
-            let v2 = Vec2::new(
-                x - rotation.cos() * SHIP_BASE / 2. - rotation.sin() * SHIP_HEIGHT / 2.,
-                y - rotation.sin() * SHIP_BASE / 2. + rotation.cos() * SHIP_HEIGHT / 2.,
-            );
-            let v3 = Vec2::new(
-                x + rotation.cos() * SHIP_BASE / 2. - rotation.sin() * SHIP_HEIGHT / 2.,
-                y + rotation.sin() * SHIP_BASE / 2. + rotation.cos() * SHIP_HEIGHT / 2.,
-            );
-            draw_triangle(v1 + displ_vec, v2 + displ_vec, v3 + displ_vec, color);
-        }
-
-        // render frame status
-        let frame_status_str = match self.frame_info {
-            FrameStatus::Normal => "Status: Normal",
-            FrameStatus::Slow => "Status: Running Slow - Allows other players to catch up",
-            FrameStatus::Halt => "Status: Halting - Too far ahead of other players",
-        };
-        draw_text(frame_status_str, 20.0, 20.0, 30.0, WHITE);
-
-        // render checksums
-        let last_checksum_str = format!(
-            "Frame {}: Checksum {}",
-            self.last_checksum.0, self.last_checksum.1
-        );
-        let periodic_checksum_str = format!(
-            "Frame {}: Checksum {}",
-            self.periodic_checksum.0, self.periodic_checksum.1
-        );
-        draw_text(&last_checksum_str, 20.0, 40.0, 30.0, WHITE);
-        draw_text(&periodic_checksum_str, 20.0, 60.0, 30.0, WHITE);
-        draw_text("---------------------------------", 20.0, 80.0, 30.0, WHITE);
-
-        // render network stats
-        for (i, con_info) in self.connection_info.iter().enumerate() {
-            let mut info_str = format!("Player {i}: ");
-            match con_info.status {
-                ConnectionStatus::Local => info_str += "local player",
-                ConnectionStatus::Synchronizing => {
-                    info_str.push_str("Synchronizing, ");
-                    info_str.push_str(&stats_to_string(con_info.stats));
-                }
-                ConnectionStatus::Running => {
-                    info_str.push_str("Running, ");
-                    info_str.push_str(&stats_to_string(con_info.stats));
-                }
-                ConnectionStatus::Interrupted => {
-                    info_str.push_str("Interrupted, ");
-                    info_str.push_str(&stats_to_string(con_info.stats));
-                }
-                ConnectionStatus::Disconnected => {
-                    info_str.push_str("Disconnected, ");
-                    info_str.push_str(&stats_to_string(con_info.stats));
-                }
-            };
-            draw_text(&info_str, 20.0, 100.0 + (i as f32 * 20.0), 30.0, WHITE);
-        }
-
-        let y = 100.0 + self.num_players as f32 * 20.0;
-        draw_text("---------------------------------", 20.0, y, 30.0, WHITE);
-        draw_text("Controls: W,A,S,D to move", 20.0, y + 20.0, 30.0, WHITE);*/
-    }
-
-    // creates a compact representation of currently pressed keys
-    pub fn local_input(&self, handle: PlayerHandle) -> Input {
-        let mut inp: u8 = 0;
-        /*
-        // player 1 with WASD
-        if handle == 0 {
-            if is_key_down(KeyCode::W) {
-                inp |= INPUT_UP;
-            }
-            if is_key_down(KeyCode::A) {
-                inp |= INPUT_LEFT;
-            }
-            if is_key_down(KeyCode::S) {
-                inp |= INPUT_DOWN;
-            }
-            if is_key_down(KeyCode::D) {
-                inp |= INPUT_RIGHT;
-            }
-        }
-        // player 2 with arrow keys
-        if handle == 1 {
-            if is_key_down(KeyCode::Up) {
-                inp |= INPUT_UP;
-            }
-            if is_key_down(KeyCode::Left) {
-                inp |= INPUT_LEFT;
-            }
-            if is_key_down(KeyCode::Down) {
-                inp |= INPUT_DOWN;
-            }
-            if is_key_down(KeyCode::Right) {
-                inp |= INPUT_RIGHT;
-            }
-        }*/
-
-        Input { inp }
-    }
-}
-
-// BoxGameState holds all relevant information about the game state
-#[derive(Clone, Serialize, Deserialize)]
-pub struct State {
+pub struct MovementData {
+    distance: f32,
+    duration: i32,
+    ease: f32,
     frame: i32,
-    num_players: usize,
-    positions: Vec<(f32, f32)>,
-    velocities: Vec<(f32, f32)>,
-    rotations: Vec<f32>,
+    direction: Vec2
 }
 
-impl State {
-    pub fn new(num_players: usize) -> Self {
-        let mut positions = Vec::new();
-        let mut velocities = Vec::new();
-        let mut rotations = Vec::new();
+impl MovementData {
+    pub fn new(distance: f32, duration: i32, ease: f32, frame: i32, direction: Vec2) -> MovementData {
+        return MovementData { distance, duration, ease, frame: frame, direction }
+    }
+    pub fn from_movement_effect(movement_effect: MovementEffect) -> MovementData {
+        return MovementData::new(movement_effect.distance, movement_effect.duration, movement_effect.ease, 0, movement_effect.direction);
+    }
+}
 
-        let r = ARENA_WIDTH as f32 / 4.0;
+#[derive(Default)]
+pub struct GameInput {
+    input_log: VecDeque<Inputs>,
+    smash_log: VecDeque<Inputs>,
+}
 
-        for i in 0..num_players as i32 {
-            let rot = i as f32 / num_players as f32 * 2.0 * std::f32::consts::PI;
-            let x = ARENA_WIDTH as f32 / 2.0 + r * rot.cos();
-            let y = ARENA_HEIGHT as f32 / 2.0 + r * rot.sin();
-            positions.push((x as f32, y as f32));
-            velocities.push((0.0, 0.0));
-            rotations.push((rot + std::f32::consts::PI) % (2.0 * std::f32::consts::PI));
+pub fn spawn_players(mut commands: Commands, sprites: Res<SpriteRes>, fighter_list: Res<FighterList>){
+    spawn_player(&mut commands, &sprites, &fighter_list, 0, Vec3::new(-50., 0., 0.), "Ky".to_owned(), "Idle".to_owned());
+    spawn_player(&mut commands, &sprites, &fighter_list, 1, Vec3::new(50., 0., 0.), "Id".to_owned(), "Idle".to_owned());
+}
+
+pub fn spawn_player(commands: &mut Commands, sprites: &Res<SpriteRes>, fighter_list: &Res<FighterList>, handle: usize, position: Vec3, character: String, starting_animation: String){
+    //TODO: make a default invisible "loading" sprite instead of grabbing the atlas manually
+    if let Some(atlas) = sprites.atlases.get(&character.to_lowercase()) {
+        commands.spawn((
+            Player{ handle: handle, fighter: get_fighter(character.to_owned(), fighter_list) },
+            Movable { ..default() },
+            ActionComponent { ..default() },
+            AnimationData::new(character, starting_animation, atlas),
+            SpriteSheetBundle {
+                transform: Transform::from_translation(position),
+                texture_atlas: atlas.atlas.to_owned(),
+                sprite: TextureAtlasSprite::new(0),
+                ..default()
+            }
+        )).add_rollback();
+    }
+}
+
+pub fn input(
+    keyboard_input: Res<Input<KeyCode>>,
+    gamepads: Res<Gamepads>,
+    button_inputs: Res<Input<GamepadButton>>,
+    button_axes: Res<Axis<GamepadButton>>,
+    axes: Res<Axis<GamepadAxis>>, 
+) -> Inputs {
+    let mut inp: Inputs = Inputs::NONE;
+    
+    //https://github.com/bevyengine/bevy/blob/release-0.11.3/examples/input/gamepad_input.rs
+    for gamepad in gamepads.iter() {
+        if button_inputs.just_pressed(GamepadButton::new(gamepad, GamepadButtonType::West)) {
+            inp |= Inputs::L;
+        }
+        if button_inputs.just_pressed(GamepadButton::new(gamepad, GamepadButtonType::North)) {
+            inp |= Inputs::M;
+        }
+        if button_inputs.just_pressed(GamepadButton::new(gamepad, GamepadButtonType::East)) {
+            inp |= Inputs::H;
+        }
+        if button_inputs.just_pressed(GamepadButton::new(gamepad, GamepadButtonType::South)) {
+            inp |= Inputs::S;
+        }
+        
+        let left_stick_x = axes
+            .get(GamepadAxis::new(gamepad, GamepadAxisType::LeftStickX))
+            .unwrap();
+        let left_stick_y = axes
+            .get(GamepadAxis::new(gamepad, GamepadAxisType::LeftStickY))
+            .unwrap();
+        if left_stick_x > 0.25 {
+            inp |= Inputs::RIGHT;
+        }
+        if left_stick_x < -0.25 {
+            inp |= Inputs::LEFT;
+        }
+        if left_stick_y > 0.25 {
+            inp |= Inputs::UP;
+        }
+        if left_stick_y < -0.25 {
+            inp |= Inputs::DOWN;
         }
 
-        Self {
-            frame: 0,
-            num_players,
-            positions,
-            velocities,
-            rotations,
+        /*
+        let right_trigger = button_axes
+            .get(GamepadButton::new(
+                gamepad,
+                GamepadButtonType::RightTrigger2,
+            ))
+            .unwrap();
+        if right_trigger.abs() > 0.01 {
+            info!("{:?} RightTrigger2 value is {}", gamepad, right_trigger);
         }
+
+        let left_stick_x = axes
+            .get(GamepadAxis::new(gamepad, GamepadAxisType::LeftStickX))
+            .unwrap();
+        if left_stick_x.abs() > 0.01 {
+            info!("{:?} LeftStickX value is {}", gamepad, left_stick_x);
+        }
+        */
+    }
+    
+    if keyboard_input.any_pressed([KeyCode::W, KeyCode::Up]) {
+        inp |= Inputs::UP;
+    }
+    if keyboard_input.any_pressed([KeyCode::A, KeyCode::Left]) {
+        inp |= Inputs::LEFT;
+    }
+    if keyboard_input.any_pressed([KeyCode::S, KeyCode::Down]) {
+        inp |= Inputs::DOWN;
+    }
+    if keyboard_input.any_pressed([KeyCode::D, KeyCode::Right]) {
+        inp |= Inputs::RIGHT;
+    }
+    
+    if keyboard_input.any_pressed([KeyCode::H, KeyCode::Z]) {
+        inp |= Inputs::L;
+    }
+    if keyboard_input.any_pressed([KeyCode::J, KeyCode::X]) {
+        inp |= Inputs::M;
+    }
+    if keyboard_input.any_pressed([KeyCode::K, KeyCode::C]) {
+        inp |= Inputs::H;
+    }
+    if keyboard_input.any_pressed([KeyCode::L, KeyCode::V]) {
+        inp |= Inputs::S;
     }
 
-    pub fn advance(&mut self, inputs: Vec<(Input, InputStatus)>) {
-        // increase the frame counter
-        self.frame += 1;
+    inp
+}
 
-        for i in 0..self.num_players {
-            // get input of that player
-            let input = match inputs[i].1 {
-                InputStatus::Confirmed => inputs[i].0.inp,
-                InputStatus::Predicted => inputs[i].0.inp,
-                InputStatus::Disconnected => INPUT_LEFT, // disconnected players spin
-            };
+pub fn set_player_input(inputs: Vec<Inputs>, mut players: Query<(&mut Movable, &Player, &mut ActionComponent)>) {
+	let log_length = 30; //how long the motion buffer should last
+	let buffer_length = 1; //how long buffered moves should buffer for (for getups and cancels and such)
+    
+    for (mut movable, player, mut actions) in &mut players {
 
-            // old values
-            let (old_x, old_y) = self.positions[i];
-            let (old_vel_x, old_vel_y) = self.velocities[i];
-            let mut rot = self.rotations[i];
+        let mut smash_input = inputs[player.handle];
+        if let Some(last_input) = movable.input.input_log.back(){
+            smash_input &= !*last_input;
+        }
+        movable.input.smash_log.push_back(smash_input);
+        if movable.input.smash_log.len() > log_length {
+            movable.input.smash_log.pop_front();
+        }
+        movable.input.input_log.push_back(inputs[player.handle]);
+        if movable.input.input_log.len() > log_length {
+            movable.input.input_log.pop_front();
+        }
+        
+        for potentialmove in &player.fighter.moves {
+            for buffered_input in movable.input.smash_log.to_owned().iter().rev().take(buffer_length) {
+                if *buffered_input == Inputs::BUFFERCLEAR {
+                    break;
+                }
+                if buffered_input.has(&potentialmove.input) {
+                    let mut input_iter = potentialmove.motion.iter().rev().peekable();
+                    let mut previous_motion_input = 5;
+                    let mut previous_input = Inputs::NONE;
 
-            // slow down
-            let mut vel_x = old_vel_x * FRICTION;
-            let mut vel_y = old_vel_y * FRICTION;
 
-            // thrust
-            if input & INPUT_UP != 0 && input & INPUT_DOWN == 0 {
-                vel_x += MOVEMENT_SPEED * rot.cos();
-                vel_y += MOVEMENT_SPEED * rot.sin();
+                    //make it so moves without a button to press take the last button press as the input
+                    if !(potentialmove.input == Inputs::NONE && 
+                        movable.input.input_log.back().is_some() && 
+                        *movable.input.input_log.back().unwrap() == Inputs::NONE) {
+                        for input in movable.input.input_log.iter().rev() {
+                            if *input == Inputs::BUFFERCLEAR {
+                                break;
+                            }
+                            if let Some(iter_input) = input_iter.next_if(
+                                |&x| input.has_dir(x) || (*x != 5 && (input.movement_input() & previous_input).has_dir(x))
+                            ) {
+                                previous_motion_input = *iter_input;
+                            } else {
+                                if !(input.has_dir(&5) || 
+                                (input_iter.peek().is_some() && input.has_dir_loose(input_iter.peek().unwrap())) || 
+                                input.has_dir_loose(&previous_motion_input)) {
+                                    break;
+                                }
+                            }
+                            previous_input = input.movement_input();
+                        }
+                    }
+                    
+                    if input_iter.peek().is_none() { 
+                        if actions.actions.len() == 0 {
+                            println!("Move {} started!", potentialmove.name);
+                            actions.actions = potentialmove.actions.to_owned();
+
+                            if potentialmove.input != Inputs::NONE {
+                                movable.input.smash_log.push_back(Inputs::BUFFERCLEAR);
+                                movable.input.input_log.push_back(Inputs::BUFFERCLEAR);
+                            }
+                        }
+                    }
+                }
             }
-            // break
-            if input & INPUT_UP == 0 && input & INPUT_DOWN != 0 {
-                vel_x -= MOVEMENT_SPEED * rot.cos();
-                vel_y -= MOVEMENT_SPEED * rot.sin();
-            }
-            // turn left
-            if input & INPUT_LEFT != 0 && input & INPUT_RIGHT == 0 {
-                rot = (rot - ROTATION_SPEED).rem_euclid(2.0 * std::f32::consts::PI);
-            }
-            // turn right
-            if input & INPUT_LEFT == 0 && input & INPUT_RIGHT != 0 {
-                rot = (rot + ROTATION_SPEED).rem_euclid(2.0 * std::f32::consts::PI);
-            }
-
-            // limit speed
-            let magnitude = (vel_x * vel_x + vel_y * vel_y).sqrt();
-            if magnitude > MAX_SPEED {
-                vel_x = (vel_x * MAX_SPEED) / magnitude;
-                vel_y = (vel_y * MAX_SPEED) / magnitude;
-            }
-
-            // compute new position
-            let mut x = old_x + vel_x;
-            let mut y = old_y + vel_y;
-
-            // constrain players to canvas borders
-            x = x.max(0.0);
-            x = x.min(ARENA_WIDTH);
-            y = y.max(0.0);
-            y = y.min(ARENA_HEIGHT);
-
-            // update all state
-            self.positions[i] = (x, y);
-            self.velocities[i] = (vel_x, vel_y);
-            self.rotations[i] = rot;
         }
     }
+}
+
+pub fn movable_system(mut movables: Query<(&mut Transform, &mut Movable)>) {
+    for (mut transform, mut movable) in &mut movables {
+        let mut move_delta = Vec2::ZERO;
+        movable.movements.retain_mut(|movement_data| {
+            let &mut MovementData { distance, duration, ease, frame, direction } = movement_data;
+            if ease > 0.0 {
+                move_delta += distance * ((1.0 - (frame as f32) / (duration as f32)).powf(ease) - (1.0 - (frame as f32 + 1.0) / (duration as f32)).powf(ease)) * direction;
+            } else {
+                move_delta += distance * ((1.0 - (frame as f32 + 1.0) / (duration as f32)).powf(-ease) - (1.0 - (frame as f32) / (duration as f32)).powf(-ease)) * direction;
+            }
+            movement_data.frame += 1;
+            return movement_data.frame < duration;
+        });
+        movable.yspeed += movable.gravity;
+        move_delta.y += movable.yspeed;
+
+        //add better collision here
+        transform.translation += move_delta.extend(0.0);
+        if transform.translation.y <= -50.0 {
+            transform.translation.y = -50.0;
+            movable.grounded = true;
+        } else {
+            movable.grounded = false;
+        }
+
+        movable.gravity = -9.8/15.;
+    }
+}
+
+pub fn soft_collision() {
+
+}
+
+pub fn hard_collision() {
+
 }

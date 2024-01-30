@@ -1,237 +1,151 @@
+mod backend;
 mod game;
-mod lobby;
+mod netcode;
+mod menu;
+mod fighters;
+mod actions;
 
-use ggez::*;
-use async_executor::LocalExecutor;
-use game::{FrameStatus, GGRSConfig, Game};
-use ggrs::{GGRSError, P2PSession, PlayerType, SessionBuilder, SessionState};
-use instant::{Duration, Instant};
-use matchbox_socket::WebRtcSocket;
+use crate::game::*;
+use crate::netcode::*;
+use crate::menu::*;
+use actions::parse_actions;
+use backend::*;
+use bevy::prelude::*;
+use bevy::utils::hashbrown::HashMap;
+use bevy::asset::LoadState;
+use bevy::render::camera::ScalingMode;
+use bevy_ggrs::{GgrsAppExtension, GgrsPlugin, GgrsSchedule};
+use fighters::fighters_setup;
+use fighters::Fighter;
+use fighters::FighterList;
+use fighters::FighterLoader;
 
-use crate::game::ConnectionStatus;
-use crate::lobby::Lobby;
+const FPS: usize = 60;
 
-const NUM_PLAYERS: usize = 1;
-const MATCHBOX_ADDR: &str = "ws://127.0.0.1:3536";
-const FPS: f64 = 60.0;
-
-enum DemoState {
-    Lobby,
-    Connecting,
-    Game,
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, States)]
+enum AppState {
+    #[default]
+    Setup,
+    Finished,
 }
 
-
-struct GGRSDemo<'a> {
-    state: DemoState,
-    executor: LocalExecutor<'a>,
-    socket: Option<WebRtcSocket>,
-    session: Option<P2PSession<GGRSConfig>>,
-    lobby: Lobby,
-    game: Game,
-    last_update: Instant,
-    accumulator: Duration,
+#[derive(Clone, Eq, PartialEq, Debug, Hash, Default, States)]
+pub enum GameState {
+    #[default]
+    Loading,
+    Menu,
+    Gameplay,
 }
 
-impl<'a> GGRSDemo<'a> {
-    fn new(/*logo: graphics::Image*/) -> Self {
-        Self {
-            state: DemoState::Lobby,
-            executor: LocalExecutor::new(),
-            socket: None,
-            session: None,
-            game: Game::new(NUM_PLAYERS),
-            lobby: Lobby::new(/*logo*/),
-            last_update: Instant::now(),
-            accumulator: Duration::ZERO,
-        }
-    }
+#[derive(Resource, Default)]
+struct FileHandles {
+    handles: Vec<HandleUntyped>,
+}
 
-    fn run(&mut self) {
-        //loop {
-            //clear_background(BLACK);
-            match &mut self.state {
-                DemoState::Lobby => self.run_lobby(),
-                DemoState::Connecting => self.run_connecting(),
-                DemoState::Game => self.run_game(),
-            }
-            //next_frame().await;
-        //}
-    }
+#[derive(Bundle)]
+struct PlayerBundle {
+    player: Player,
+    sprite: SpriteSheetBundle,
+}
 
-    fn run_lobby(&mut self) {
-        if let Some(room_id) = self.lobby.run() {
-            println!("Constructing socket...");
-            let room_url = format!("{MATCHBOX_ADDR}/{room_id}");
-            let (socket, message_loop) = WebRtcSocket::new(room_url);
-            self.socket = Some(socket);
-            let task = self.executor.spawn(message_loop);
-            task.detach();
-            self.state = DemoState::Connecting;
-        }
-    }
+fn main() {
+    let mut app = App::new();
 
-    fn run_connecting(&mut self) {
-        let socket = self
-            .socket
-            .as_mut()
-            .expect("Should only be in connecting state if there exists a socket.");
+    app
+        .add_state::<AppState>()
+        .add_state::<GameState>()
+        .add_state::<NetworkState>()
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                // fill the entire window
+                fit_canvas_to_parent: true,
+                // don't hijack keyboard shortcuts like F5, F6, F12, Ctrl+R etc.
+                prevent_default_event_handling: false,
+                ..default()
+            }),
+            ..default()
+        }).set(ImagePlugin::default_nearest()))
+        .add_ggrs_plugin(
+            GgrsPlugin::<GGRSConfig>::new()
+            .with_update_frequency(FPS)
+            .with_input_system(network_input)
+            .register_rollback_component::<Transform>()
+            //.register_rollback_component::<ActionComponent>()
+            //.register_rollback_component::<Movable>()
+            //.register_rollback_component::<Checksum>()
+            //.register_rollback_resource::<FrameCount>()
+        )
 
-        self.executor.try_tick();
-        socket.accept_new_connections();
+        .add_asset::<AnimationInfo>()
+        .init_asset_loader::<AnimationInfoLoader>()
 
-        let info_str = format!(
-            "Waiting for {} more player(s)...",
-            NUM_PLAYERS - 1 - socket.connected_peers().len()
-        );
-        //draw_text(&info_str, 20.0, 20.0, 30.0, WHITE);
+        .add_asset::<Fighter>()
+        .init_asset_loader::<FighterLoader>()
 
-        // if we have enough players - we assume there to be only one local player
-        if socket.connected_peers().len() >= NUM_PLAYERS - 1 {
-            // create a new game
-            println!("Starting new game...");
-            self.game = Game::new(NUM_PLAYERS);
-            self.state = DemoState::Game;
+        .init_resource::<FileHandles>()
+        .insert_resource(SpriteRes { atlases: HashMap::new() })
+        .insert_resource(FighterList (HashMap::new()))
 
-            // create a new ggrs session
-            let mut sess_build = SessionBuilder::<GGRSConfig>::new()
-                .with_num_players(NUM_PLAYERS)
-                .with_max_prediction_window(12)
-                .with_fps(FPS as usize)
-                .expect("Invalid FPS")
-                .with_input_delay(2);
+        .add_systems(OnEnter(AppState::Setup), load_files)
+        .add_systems(Update, check_files.run_if(in_state(AppState::Setup)))
+        .add_systems(OnEnter(AppState::Finished), (setup, spriteset_setup, fighters_setup))
 
-            // add players
-            for (i, player_type) in socket.players().iter().enumerate() {
-                sess_build = sess_build
-                    .add_player(player_type.clone(), i)
-                    .expect("Invalid player added.");
-                if matches!(player_type, PlayerType::Local) {
-                    self.game
-                        .set_connection_status(vec![i], ConnectionStatus::Local);
-                }
-            }
+        //Backend Systems
+        .add_systems(Update, animation_system)
 
-            // start the GGRS session
-            let sess = sess_build
-                .start_p2p_session(self.socket.take().unwrap())
-                .expect("Session could not be created.");
-            self.session = Some(sess);
+        //Menus
+        .add_systems(OnEnter(GameState::Menu), menu_setup)
+        .add_systems(Update, (button_system).run_if(in_state(GameState::Menu)))
+        .add_systems(OnExit(GameState::Menu), menu_cleanup)
 
-            // reset time variables for frame ticks
-            self.last_update = Instant::now();
-            self.accumulator = Duration::ZERO;
-        }
+        //Connecting to online
+        .add_systems(OnEnter(NetworkState::Connecting), start_matchbox_socket)
+        .add_systems(Update, (wait_for_players).run_if(in_state(NetworkState::Connecting)))
 
-        // user can abort
-        /*if is_key_pressed(KeyCode::Escape) {
-            self.state = DemoState::Lobby;
-            self.socket = None;
-            self.executor = LocalExecutor::new();
-        }*/
-    }
+        //Gameplay, both offline and online
+        .add_systems(OnEnter(GameState::Gameplay), spawn_players)
+        .add_systems(FixedUpdate, movable_system)
 
-    fn run_game(&mut self) {
-        let sess = self
-            .session
-            .as_mut()
-            .expect("Should only be in game state if there exists a session.");
+        //Offline gameplay
+        .add_systems(FixedUpdate, (offline_apply_inputs, parse_actions).run_if(in_state(NetworkState::Offline).and_then(in_state(GameState::Gameplay))))
 
-        // communicate, receive and send packets
-        self.executor.try_tick();
-        sess.poll_remote_clients();
-        self.executor.try_tick();
+        //Online Gameplay (rollback schedule)
+        .add_systems(
+            GgrsSchedule,
+            (
+                apply_inputs,
+                parse_actions,
+                //increase_frame_count,
+                //checksum_players,
+            )
+                .chain().run_if(in_state(NetworkState::Online)),
+        )
+        .run();
+}
 
-        // handle GGRS events
-        self.game.handle_events(sess);
+fn load_files(mut file_handles: ResMut<FileHandles>, asset_server: Res<AssetServer>) {
+    // load multiple, individual sprites from a folder
+    file_handles.handles = asset_server.load_folder("./").unwrap();
+}
 
-        // update network stats
-        for handle in sess.remote_player_handles() {
-            self.game.connection_info[handle].stats = sess.network_stats(handle).ok();
-        }
-
-        // this is to keep ticks between clients synchronized.
-        // if a client is ahead, it will run frames slightly slower to allow catching up
-        let mut fps_delta = 1. / FPS;
-        if sess.frames_ahead() > 0 {
-            fps_delta *= 1.1;
-        }
-
-        // get delta time from last iteration and accumulate it
-        let delta = Instant::now().duration_since(self.last_update);
-        self.accumulator = self.accumulator.saturating_add(delta);
-        self.last_update = Instant::now();
-
-        // if enough time is accumulated, we run a frame
-        while self.accumulator.as_secs_f64() > fps_delta {
-            // decrease accumulator
-            self.accumulator = self
-                .accumulator
-                .saturating_sub(Duration::from_secs_f64(fps_delta));
-
-            // frames are only happening if the sessions are synchronized
-            if sess.current_state() == SessionState::Running {
-                // add input for all local players
-                for handle in sess.local_player_handles() {
-                    sess.add_local_input(handle, self.game.local_input(0))
-                        .expect("Invalid player handle"); // we always call game.local_input(0) in order to get WASD inputs.
-                }
-
-                match sess.advance_frame() {
-                    Ok(requests) => {
-                        self.game.handle_requests(requests);
-                        self.game.frame_info = if sess.frames_ahead() > 0 {
-                            FrameStatus::Slow
-                        } else {
-                            FrameStatus::Normal
-                        }
-                    }
-                    Err(GGRSError::PredictionThreshold) => self.game.frame_info = FrameStatus::Halt,
-                    Err(e) => panic!(
-                        "Unknown error happened during P2PSession::<_>::advance_frame(): {e}"
-                    ),
-                }
-            }
-        }
-
-        self.game.render();
-        self.executor.try_tick();
+fn check_files(
+    mut next_state: ResMut<NextState<AppState>>,
+    file_handles: ResMut<FileHandles>,
+    asset_server: Res<AssetServer>,
+) {
+    // Advance the `AppState` once all sprite handles have been loaded by the `AssetServer`
+    if let LoadState::Loaded = asset_server
+        .get_group_load_state(file_handles.handles.iter().map(|handle| handle.id()))
+    {
+        next_state.set(AppState::Finished);
     }
 }
 
-struct State<'a> {
-    accumulator: std::time::Duration,
-    demo: GGRSDemo<'a>
-}
+fn setup(mut commands: Commands,
+    mut next_state: ResMut<NextState<GameState>>,) {
+    let mut camera_bundle = Camera2dBundle::default();
+    camera_bundle.projection.scaling_mode = ScalingMode::Fixed { width: 432.0, height: 243.0 };
+    commands.spawn(camera_bundle);
 
-impl ggez::event::EventHandler<GameError> for State<'_> {
-    fn update(&mut self, ctx: &mut Context) -> GameResult {
-        /*self.accumulator = self.accumulator.saturating_add(ctx.time.delta());
-        let fps_delta = 1. / FPS;
-        while self.accumulator.as_secs_f64() > fps_delta {
-            // decrease accumulator
-            self.accumulator = self
-                .accumulator
-                .saturating_sub(Duration::from_secs_f64(fps_delta));
-        }*/
-        self.demo.run();
-        Ok(())
-    }
-    fn draw(&mut self, ctx: &mut Context) -> GameResult {
-        //println!("Hello ggez!");
-        Ok(())
-    }
-}
-
-pub fn main() {
-    let state = State {
-        accumulator: std::time::Duration::new(0, 0),
-        demo: GGRSDemo::new()
-    };
-    let c = conf::Conf::new();
-    let (ctx, event_loop) = ContextBuilder::new("hello_ggez", "awesome_person")
-        .default_conf(c)
-        .build()
-        .unwrap();
-    event::run(ctx, event_loop, state);
+    next_state.set(GameState::Menu);
 }

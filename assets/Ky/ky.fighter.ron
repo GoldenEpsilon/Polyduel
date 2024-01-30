@@ -1,0 +1,249 @@
+(
+    name: "ky",
+    moves: [
+        (
+            name: "Walk",
+            from_idle: true,
+            aerial: false,
+            aerial_action: false,
+            motion: [
+                6,
+            ],
+            input: (0),
+            actions: [
+                (
+                    animation_speed: 0.0,
+                    sprite: "Idle",
+                    duration: 0,
+                    start_effects: [
+                    ],
+                    effects: [
+                        Move((
+                            distance: 1.5,
+                            duration: 1,
+                            ease: 1.0,
+                            direction: (1.0, 0.0),
+                        )),
+                    ],
+                    end_effects: [],
+                ),
+            ],
+        ),
+        (
+            name: "WalkBack",
+            from_idle: true,
+            aerial: false,
+            aerial_action: false,
+            motion: [
+                4,
+            ],
+            input: (0),
+            actions: [
+                (
+                    animation_speed: 0.0,
+                    sprite: "Idle",
+                    duration: 0,
+                    start_effects: [
+                    ],
+                    effects: [
+                        Move((
+                            distance: -1.0,
+                            duration: 1,
+                            ease: 1.0,
+                            direction: (1.0, 0.0),
+                        )),
+                    ],
+                    end_effects: [],
+                ),
+            ],
+        ),
+        (
+            name: "Dash",
+            from_idle: true,
+            aerial: false,
+            aerial_action: false,
+            motion: [
+                5,
+                6,
+                5,
+                6,
+            ],
+            input: (8),
+            actions: [
+                (
+                    animation_speed: 0.0,
+                    sprite: "Idle",
+                    duration: 0,
+                    start_effects: [
+                        Move((
+                            distance: 60.0,
+                            duration: 8,
+                            ease: 1.5,
+                            direction: (1.0, 0.0),
+                        )),
+                    ],
+                    effects: [
+                        Wait(10),
+                    ],
+                    end_effects: [],
+                ),
+            ],
+        ),
+        (
+            name: "JumpNeutral",
+            from_idle: true,
+            aerial: false,
+            aerial_action: false,
+            motion: [
+                8
+            ],
+            input: (0),
+            actions: [
+                (
+                    animation_speed: 0.0,
+                    sprite: "Idle",
+                    duration: 0,
+                    start_effects: [],
+                    effects: [
+                        Wait(3),
+                    ],
+                    end_effects: [],
+                ),
+                (
+                    animation_speed: 0.0,
+                    sprite: "Idle",
+                    duration: 0,
+                    start_effects: [
+                        SetYSpeed(12.0)
+                    ],
+                    effects: [
+                        WaitForGround,
+                    ],
+                    end_effects: [],
+                ),
+                (
+                    animation_speed: 0.0,
+                    sprite: "Idle",
+                    duration: 0,
+                    start_effects: [],
+                    effects: [
+                        Wait(10),
+                    ],
+                    end_effects: [],
+                ),
+            ],
+        ),
+        (
+            name: "JumpForward",
+            from_idle: true,
+            aerial: false,
+            aerial_action: false,
+            motion: [
+                9
+            ],
+            input: (0),
+            actions: [
+                (
+                    animation_speed: 0.0,
+                    sprite: "Idle",
+                    duration: 0,
+                    start_effects: [],
+                    effects: [
+                        Wait(3),
+                    ],
+                    end_effects: [],
+                ),
+                (
+                    animation_speed: 0.0,
+                    sprite: "Idle",
+                    duration: 0,
+                    start_effects: [
+                        SetYSpeed(12.0),
+                        Move((
+                            distance: 60.0,
+                            duration: 32,
+                            ease: 1.2,
+                            direction: (1.0, 0.0),
+                        )),
+                    ],
+                    effects: [
+                        WaitForGround,
+                    ],
+                    end_effects: [],
+                ),
+                (
+                    animation_speed: 0.0,
+                    sprite: "Idle",
+                    duration: 0,
+                    start_effects: [],
+                    effects: [
+                        Wait(10),
+                    ],
+                    end_effects: [],
+                ),
+            ],
+        ),
+        (
+            name: "StunDipper",
+            from_idle: true,
+            aerial: false,
+            aerial_action: false,
+            motion: [
+                2,
+                6,
+            ],
+            input: (4),
+            actions: [
+                (
+                    animation_speed: 0.0,
+                    sprite: "Idle",
+                    duration: 0,
+                    start_effects: [
+                        Move((
+                            distance: 100.0,
+                            duration: 40,
+                            ease: 1.0,
+                            direction: (1.0, 0.0),
+                        )),
+                    ],
+                    effects: [
+                        Wait(10),
+                    ],
+                    end_effects: [],
+                ),
+            ],
+        ),
+        (
+            name: "Super",
+            from_idle: true,
+            aerial: false,
+            aerial_action: false,
+            motion: [
+                6,
+                2,
+                4,
+                6,
+            ],
+            input: (128),
+            actions: [
+                (
+                    animation_speed: 0.0,
+                    sprite: "Idle",
+                    duration: 0,
+                    start_effects: [
+                        Move((
+                            distance: 200.0,
+                            duration: 40,
+                            ease: 1.0,
+                            direction: (1.0, 0.0),
+                        )),
+                    ],
+                    effects: [
+                        Wait(10),
+                    ],
+                    end_effects: [],
+                ),
+            ],
+        ),
+    ],
+)
