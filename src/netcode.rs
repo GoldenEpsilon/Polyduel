@@ -25,7 +25,7 @@ pub struct IP {
 #[derive(Debug)]
 pub struct GGRSConfig;
 impl Config for GGRSConfig {
-    type Input = u16;
+    type Input = Inputs;
     type State = u8;
     type Address = PeerId;
 }
@@ -78,12 +78,30 @@ pub fn wait_for_players(mut next_state: ResMut<NextState<NetworkState>>, mut com
 
 pub fn network_input(
     _: In<PlayerHandle>,
-    keyboard_input: Res<Input<KeyCode>>
-) -> u16 {
-    return input(keyboard_input);
+    keyboard_input: Res<Input<KeyCode>>,
+    gamepads: Res<Gamepads>,
+    button_inputs: Res<Input<GamepadButton>>,
+    button_axes: Res<Axis<GamepadButton>>,
+    axes: Res<Axis<GamepadAxis>>, 
+) -> Inputs {
+    return input(keyboard_input, gamepads, button_inputs, button_axes, axes);
 }
 
-pub fn network_move_players(inputs: Res<PlayerInputs<GGRSConfig>>, players: Query<(&mut Transform, &Player)>) {
-    let (localinputs, _inputstatus): (Vec<u16>, Vec<InputStatus>) = inputs.iter().cloned().unzip();
-    move_players(localinputs, players);
+pub fn apply_inputs(inputs: Res<PlayerInputs<GGRSConfig>>, players: Query<(&mut Movable, &Player, &mut ActionComponent)>) {
+    let (localinputs, _inputstatus): (Vec<Inputs>, Vec<InputStatus>) = inputs.iter().cloned().unzip();
+    set_player_input(localinputs, players);
+}
+
+pub fn offline_apply_inputs(
+    keyboard_input: Res<Input<KeyCode>>, 
+    gamepads: Res<Gamepads>,
+    button_inputs: Res<Input<GamepadButton>>,
+    button_axes: Res<Axis<GamepadButton>>,
+    axes: Res<Axis<GamepadAxis>>, 
+    players: Query<(&mut Movable, &Player, &mut ActionComponent)>){
+    let mut inputs: Vec<Inputs> = vec![Inputs::NONE; players.iter().len()];
+    if players.iter().len() > 0 {
+        inputs[0] = input(keyboard_input, gamepads, button_inputs, button_axes, axes);//TEMP, is currently only going to P1 slot
+        set_player_input(inputs, players);
+    }
 }
