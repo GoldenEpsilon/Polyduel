@@ -19,6 +19,7 @@ use fighters::fighters_setup;
 use fighters::Fighter;
 use fighters::FighterList;
 use fighters::FighterLoader;
+use bevy_egui::EguiPlugin;
 
 const FPS: usize = 60;
 
@@ -65,6 +66,7 @@ fn main() {
             }),
             ..default()
         }).set(ImagePlugin::default_nearest()))
+        .add_plugins(EguiPlugin)
         .add_ggrs_plugin(
             GgrsPlugin::<GGRSConfig>::new()
             .with_update_frequency(FPS)
