@@ -1,6 +1,8 @@
 use crate::*;
 
 use bevy::prelude::*;
+use bevy_egui::egui;
+use bevy_egui::EguiContexts;
 
 
 #[derive(Component)]
@@ -10,7 +12,8 @@ pub struct MenuButton {
 
 pub enum ButtonType {
     Online,
-    Offline
+    Offline,
+    Editor
 }
 
 #[derive(Resource)]
@@ -59,6 +62,33 @@ pub fn menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                         },
                     ));
                 });
+            parent
+                .spawn((ButtonBundle {
+                    style: Style {
+                        width: Val::Px(150.0),
+                        height: Val::Px(65.0),
+                        border: UiRect::all(Val::Px(5.0)),
+                        // horizontally center child text
+                        justify_content: JustifyContent::Center,
+                        // vertically center child text
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    border_color: BorderColor(Color::BLACK),
+                    background_color: BackgroundColor(Color::RED),
+                    ..default()
+                }, MenuButton { button_type: ButtonType::Editor }))
+                .with_children(|parent| {
+                    parent.spawn(TextBundle::from_section(
+                        "Button",
+                        TextStyle {
+                            //font: asset_server.load("fonts/FiraSans-Bold.ttf"),
+                            font_size: 40.0,
+                            color: Color::rgb(0.9, 0.9, 0.9),
+                            ..default()
+                        },
+                    ));
+                });
         }).id();
     commands.insert_resource(MenuData { button_entity });
 }
@@ -89,6 +119,10 @@ pub fn button_system(
                         network_state.set(NetworkState::Offline);
                         next_state.set(GameState::Gameplay);
                     }
+                    ButtonType::Editor => {
+                        network_state.set(NetworkState::Offline);
+                        next_state.set(GameState::Editor);
+                    }
                     _ => {}
                 }
             }
@@ -105,6 +139,9 @@ pub fn button_system(
             ButtonType::Offline => {
                 text.sections[0].value = "Offline".to_string();
             }
+            ButtonType::Editor => {
+                text.sections[0].value = "Editor".to_string();
+            }
             _ => {
                 text.sections[0].value = "Button".to_string();
             }
@@ -117,4 +154,10 @@ pub fn menu_cleanup(
     menu_data: Res<MenuData>
 ) {
     commands.entity(menu_data.button_entity).despawn_recursive();
+}
+
+pub fn egui_menu_system(mut contexts: EguiContexts) {
+    egui::Window::new("Hello").show(contexts.ctx_mut(), |ui| {
+        ui.label("world");
+    });
 }

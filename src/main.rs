@@ -1,4 +1,5 @@
 mod backend;
+mod editor;
 mod game;
 mod netcode;
 mod menu;
@@ -6,19 +7,17 @@ mod fighters;
 mod actions;
 
 use crate::game::*;
+use crate::editor::*;
 use crate::netcode::*;
 use crate::menu::*;
-use actions::parse_actions;
+use crate::fighters::*;
+use crate::actions::*;
 use backend::*;
 use bevy::prelude::*;
 use bevy::utils::hashbrown::HashMap;
 use bevy::asset::LoadState;
 use bevy::render::camera::ScalingMode;
 use bevy_ggrs::{GgrsAppExtension, GgrsPlugin, GgrsSchedule};
-use fighters::fighters_setup;
-use fighters::Fighter;
-use fighters::FighterList;
-use fighters::FighterLoader;
 use bevy_egui::EguiPlugin;
 
 const FPS: usize = 60;
@@ -35,6 +34,7 @@ pub enum GameState {
     #[default]
     Loading,
     Menu,
+    Editor,
     Gameplay,
 }
 
@@ -85,6 +85,7 @@ fn main() {
         .init_asset_loader::<FighterLoader>()
 
         .init_resource::<FileHandles>()
+        .init_resource::<EditorUiState>()
         .insert_resource(SpriteRes { atlases: HashMap::new() })
         .insert_resource(FighterList (HashMap::new()))
 
@@ -98,7 +99,11 @@ fn main() {
         //Menus
         .add_systems(OnEnter(GameState::Menu), menu_setup)
         .add_systems(Update, (button_system).run_if(in_state(GameState::Menu)))
+        .add_systems(Update, (egui_menu_system).run_if(in_state(GameState::Menu)))
         .add_systems(OnExit(GameState::Menu), menu_cleanup)
+
+        //Fighter Editor
+        .add_systems(Update, (editor_system).run_if(in_state(GameState::Editor)))
 
         //Connecting to online
         .add_systems(OnEnter(NetworkState::Connecting), start_matchbox_socket)
