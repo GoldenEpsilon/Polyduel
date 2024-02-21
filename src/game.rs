@@ -170,7 +170,7 @@ pub fn spawn_player(commands: &mut Commands, sprites: &Res<SpriteRes>, fighter_l
             Player{ handle: handle, fighter: get_fighter(character.to_owned(), fighter_list) },
             Movable { ..default() },
             ActionComponent { ..default() },
-            AnimationData::new(character, starting_animation, atlas),
+            AnimationData::new(starting_animation, atlas),
             SpriteSheetBundle {
                 transform: Transform::from_translation(position),
                 texture_atlas: atlas.atlas.to_owned(),

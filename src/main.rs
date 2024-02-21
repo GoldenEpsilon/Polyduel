@@ -34,7 +34,6 @@ pub enum GameState {
     #[default]
     Loading,
     Menu,
-    Editor,
     Gameplay,
 }
 
@@ -99,11 +98,10 @@ fn main() {
         //Menus
         .add_systems(OnEnter(GameState::Menu), menu_setup)
         .add_systems(Update, (button_system).run_if(in_state(GameState::Menu)))
-        .add_systems(Update, (egui_menu_system).run_if(in_state(GameState::Menu)))
         .add_systems(OnExit(GameState::Menu), menu_cleanup)
 
         //Fighter Editor
-        .add_systems(Update, (editor_system).run_if(in_state(GameState::Editor)))
+        .add_systems(Update, (editor_system).run_if(in_state(NetworkState::Offline).and_then(in_state(GameState::Gameplay))))
 
         //Connecting to online
         .add_systems(OnEnter(NetworkState::Connecting), start_matchbox_socket)

@@ -49,20 +49,18 @@ pub struct AnimationData {
     timer: Timer,
     pub index: usize,
     pub just_finished: bool,
-    pub sprite_name: String,
     pub animation_name: String,
     anim_handles: Vec<Handle<Image>>,
 }
 
 impl AnimationData {
-    pub fn new(sprite_name: String, animation_name: String, atlas: &SpriteAtlas) -> AnimationData {
+    pub fn new(animation_name: String, atlas: &SpriteAtlas) -> AnimationData {
         if let Some(animation_data) = atlas.animation_data.get(&animation_name.to_lowercase()) {
             return AnimationData { 
                 timer: Timer::from_seconds(2./30., TimerMode::Repeating), 
                 index: 0,
                 just_finished: false, 
                 anim_handles: animation_data.anim_handles.to_owned(), 
-                sprite_name, 
                 animation_name };
         } else {
             return AnimationData { 
@@ -70,8 +68,15 @@ impl AnimationData {
                 index: 0,
                 just_finished: false, 
                 anim_handles: vec![], 
-                sprite_name, 
                 animation_name };
+        }
+    }
+    pub fn get_atlas_index(&self, atlas: &SpriteAtlas,
+        texture_atlases: &Res<Assets<TextureAtlas>>,) -> Option<usize> {
+        if let Some(atlas) = texture_atlases.get(&atlas.atlas) {
+            return atlas.get_texture_index(&self.anim_handles[self.index]);
+        } else {
+            return None;
         }
     }
 }
