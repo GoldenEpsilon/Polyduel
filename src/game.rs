@@ -109,7 +109,7 @@ bitflags! {
 #[derive(Component)]
 pub struct Player {
     handle: usize,
-    fighter: Fighter
+    pub fighter: Fighter
 }
 
 #[derive(Component, Default)]

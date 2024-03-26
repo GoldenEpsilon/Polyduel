@@ -1,9 +1,9 @@
 use std::{fs::{self, File}, io::Write};
 
-use crate::{get_default_fighter, AnimationData, FighterList, Inputs, SpriteRes};
+use crate::{get_default_fighter, AnimationData, Effect, FighterList, Inputs, Player, SpriteRes};
 
 use bevy_egui::{egui::{self, load::SizedTexture, Pos2, TextureId, TextureOptions, Vec2}, render_systems::EguiTextureId, EguiContexts};
-use bevy::prelude::*;
+use bevy::{prelude::*, ui};
 
 
 #[derive(Default, Resource)]
@@ -25,7 +25,8 @@ pub fn editor_system(mut contexts: EguiContexts,
     mut fighter_list: ResMut<FighterList>, 
     sprites: Res<SpriteRes>, 
     texture_atlases: Res<Assets<TextureAtlas>>, 
-    images: Res<Assets<Image>>) {
+    images: Res<Assets<Image>>,
+    mut players: Query<&mut Player>) {
     if ui_state.opened_fighter == "" {
         egui::Window::new("Fighters").show(contexts.ctx_mut(), |ui| {
             for (key, fighter) in fighter_list.0.iter() {
@@ -163,8 +164,32 @@ pub fn editor_system(mut contexts: EguiContexts,
                         }
                     });
                     ui.collapsing(format!("{} Actions:", attack.name), |ui| { 
-                        for action in &attack.actions {
-                            ui.label(format!("Action: {:#?}", action));
+                        for action in &mut attack.actions {
+                            ui.label(format!("Action:"));
+                            ui.add(egui::Slider::new(&mut action.animation_speed, 0.0..=5.0).text("Animation Speed"));
+                            egui::ComboBox::from_label("Sprite")
+                                .selected_text(format!("{:?}", action.sprite))
+                                .show_ui(ui, |ui| {
+                                    if let Some(atlas) = sprites.atlases.get(&fighter.name.to_lowercase()) {
+                                        for sprite in atlas.animation_data.keys() {
+                                            ui.selectable_value(&mut action.sprite, sprite.to_owned(), sprite);
+                                        }
+                                    }
+                                }
+                            );
+                            ui.add(egui::Slider::new(&mut action.duration, 0..=30).text("Duration"));
+                            ui.label(format!("Start Effects:"));
+                            for effect in &mut action.start_effects {
+                                effect_ui(ui, effect);
+                            }
+                            ui.label(format!("Effects:"));
+                            for effect in &mut action.effects {
+                                effect_ui(ui, effect);
+                            }
+                            ui.label(format!("End Effects:"));
+                            for effect in &mut action.end_effects {
+                                effect_ui(ui, effect);
+                            }
                         }
                     });
                 });
@@ -172,5 +197,36 @@ pub fn editor_system(mut contexts: EguiContexts,
         }
     } else {
         ui_state.fighter_name = String::new();
+    }
+
+    for mut player in players.iter_mut() {
+        if let Some(fighter) = fighter_list.0.get(&player.fighter.name) {
+            player.fighter = fighter.to_owned();
+        }
+    }
+}
+
+fn effect_ui(ui: &mut egui::Ui, effect: &mut Effect) {
+    match effect {
+        Effect::Move(val) => {
+            ui.label("Movement Effect:");
+            ui.add(egui::Slider::new(&mut val.distance, 0.0..=((val.duration as f32) * 10.0)).text("Distance"));
+            ui.add(egui::Slider::new(&mut val.duration, 0..=30).text("Duration"));
+            ui.add(egui::Slider::new(&mut val.ease, -2.0..=2.0).text("Ease"));
+            ui.add(egui::Slider::new(&mut val.direction.x, -1.0..=1.0).text("Direction X"));
+            ui.add(egui::Slider::new(&mut val.direction.y, -1.0..=1.0).text("Direction Y"));
+        }
+        Effect::Wait(val) => {
+            ui.add(egui::Slider::new(val, 0..=30).text("Wait"));
+        }
+        Effect::SetYSpeed(val) => {
+            ui.add(egui::Slider::new(val, -15.0..=15.0).text("Set Y Speed"));
+        }
+        Effect::AddYSpeed(val) => {
+            ui.add(egui::Slider::new(val, -15.0..=15.0).text("Add Y Speed"));
+        }
+        _ => {
+            ui.label(format!("{:?}", effect));
+        }
     }
 }
